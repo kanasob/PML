@@ -1,0 +1,174 @@
+---
+title: "PML- Weight Lifting Exercise"
+author: "K"
+date: "26 December 2015"
+output: html_document
+---
+
+## Synopsis
+The devices such as Jawbone Up, Nike FuelBand, and Fitbit enable us 
+to collect a large amount of data about personal activity easily. 
+People uses the devices to identify health benefits of a particular activity or
+the patterns in theri behaviour based on frequency they spend on the activity. 
+But they rarely quantify how they do it.  
+
+This reports contains the analysis predicting the manner 
+in which the subjects performed weight lifting exercises. Groupware@LES' [Weight Lifting Exercises Dataset](http://groupware.les.inf.puc-rio.br/har) is used for all the analyses 
+in this report.  
+
+The data in this dataset is collected from accelerometers on the belt, 
+forearm, arm, and dumbbell of 6 participants. They were asked to perform barbell lifts 
+correctly and incorrectly in 5 different ways (the `classe` variable in the training dataset).
+
+
+## Preparation
+### Load data
+
+```{r, echo=TRUE, eval=FALSE}
+if(!file.exists("./Project"))
+  (dir.create("./Project"))
+
+fileurl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+download.file(fileurl, destfile = "training")
+
+fileurl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(fileurl, destfile = "testing")
+```
+
+### Load packages 
+```{r}
+library (caret)
+library (randomForest)
+library (e1071)
+```
+
+### Read files
+```{r, cache=TRUE}
+training <- read.csv("training", na.strings = c("NA", "##DIV/0!",""), 
+                    stringsAsFactors = FALSE)
+testing <- read.csv("testing", na.strings = c("NA", "##DIV/0!",""), 
+                     stringsAsFactors = FALSE) 
+```
+
+### Check the features of the dataset
+```{r,echo=TRUE, eval=FALSE}
+dim(training)
+summary(training)
+na_count_train <-sapply(training, function (x) sum(length(which(is.na(x)))))
+na_count_train <- data.frame(na_count_train)
+length(which(na_count_train$na_count_train>0))
+```
+The `training` dataset contains 160 variables and 19622 raws. 100 variables in the `training` dataset contain 19216 `NA`s per variable.  
+```{r,echo=TRUE, eval=FALSE}
+dim(testing)
+summary(testing)
+na_count_test <-sapply(testing, function (x) sum(length(which(is.na(x)))))
+na_count_test <- data.frame(na_count_test)
+length(which(na_count$na_count_test>0))
+```
+The `testing` dataset contains 160 variables and 20 raws. 100 variables in the `training` dataset contain 20 `NA`s per variable.
+
+## Preprocessing
+### Create tidy datasets (`train_clean`, `test_clean`)
+#### Remove variables with `nearZeroVariance`
+```{r}
+nzv_train <- nearZeroVar(training, saveMetrics = TRUE)
+train_clean <- training[,!nzv_train$nzv]
+
+nzv_test <- nearZeroVar(testing, saveMetrics = TRUE)
+test_clean <- testing[, !nzv_test$nzv]
+```
+
+#### Remove unnecessasry variables
+```{r}
+rm_var <- c("X", "user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", 
+                  "cvtd_timestamp", "num_window","problem_id")
+train_clean <- train_clean[, !(names(train_clean) %in% rm_var)]
+test_clean <- test_clean[, !(names(test_clean) %in% rm_var)]
+```
+
+#### Remove variables with `NA`s
+```{r}
+train_clean <- train_clean [, (colSums(is.na (train_clean))==0)]
+```
+
+### Check the feature of `train_clean` and  `test_clean`
+#### Check the dimentions
+```{r}
+dim(train_clean)
+dim(test_clean)
+```
+
+### Check correlations in `train_clean`
+This was performed to identify if the linear model gives good prediction.  
+
+```{r}
+train_clean$classe <- as.factor(train_clean$classe)
+
+cor <- abs(sapply(colnames(train_clean[, -ncol(train_clean)]),
+                     function (x) cor(as.numeric(train_clean[, x]),
+                                      as.numeric(train_clean$classe),
+                                      method = "spearman")))
+
+plot (train_clean[, names(which.max(cor))],
+      train_clean[, names(which.max(cor[-which.max(cor)]))], 
+      col= train_clean$classe, pch = 20, cex = 0.1, 
+      xlab = names (which.max(cor)), ylab= names(which.max(cor[-which.max(cor)])), 
+      main = "Correlation in the train_clean Dataset" ) 
+```
+
+
+The above plot shows the correlation between a variable with highest correlations and 
+a variable the second highest correlations in `train_clean`.
+As can be seen, it is hard to say there are strong correlations in `train_clean`.
+So the linear models are not suitable for prediction. 
+
+
+### Split `train_clean` into two dataset for evaluating the prediction model
+Allocated 75% of `train_clean` for training (`tr_train`) and 25% for testing (`tr_test`).
+
+```{r}
+train_split <- createDataPartition(train_clean$classe, p=0.75, list = FALSE)
+tr_train <- train_clean[train_split, ]
+tr_test <- train_clean[-train_split, ]
+```
+
+
+## Random Forest 
+
+In general, Decision Tree generates accurate prediction with the dataset containing the small number of variables and good correlations. This allows the machine to identify the homogeneous features easily and make yes or no choice at each node.  
+With Random Forest, on the other hand, the machine does not try to find the homogeneous features. It simply performs cross-validation with random test features for all the variables in the training dataset and identifies the way to predict which works well for most variables.   
+The training dataset given for this project has 52 variables to evaluate and each variable has little correlations.
+So, the Random Forest technique is used to build a prediction model.
+
+```{r}
+set.seed (1234)
+# Fit the Random Forest model on the tr_train dataset
+train_rf <- randomForest(classe ~., data=tr_train)
+# predict in-sample error
+train_prediction <- predict(train_rf, tr_test, type="class")
+# see the performance of prediction generated with random forest technique
+confusionMatrix(train_prediction,tr_test$classe)
+```
+
+Prediction generated with `random forest` technique gave 99.39% accuracy in `tr_test`. The expected out-of sample error is 0.61%. 
+
+### Prediction with 20 test cases in `test_clean`
+
+```{r}
+test_pred <- predict(train_rf, test_clean, type = "class")
+test_pred
+```
+
+```{r, eval=FALSE}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(test_pred)
+```
+
